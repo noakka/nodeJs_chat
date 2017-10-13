@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>websocket-chat</title>
+  <link rel="stylesheet"
+  href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+  <!-- C01. Socket.IOクライアントライブラリの読込み -->
+  <script type="text/javascript" src="http://localhost:1111/socket.io/socket.io.js"></script>
+  <script type="text/javascript">
+  var socket;
+  (function(){
+    socket = io.connect("http://localhost:1111");
+  })();
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1>ChatApp</h1>
+    <h2 id="screen_name"></h2>
+    <ul id="room_member" class="list-group pull-right"></ul>
+    <p id="error_mess"></p>
+    <p id="room_list"></p>
+    <p id="chat_logs"></p>
+    <form class="form-inline">
+      <div class="form-group">
+        <label class="name_label" for="msgForm">チャットをするためにニックネームを入力してね</label>
+        <input type="text" class="form-control" id="login_name">
+      </div>
+      <button type="submit" class="btn btn-primary" id="send_button">決定</button>
+      <div id="ret_button"></div>
+    </form>
+  </div>
+
+  <script type="text/javascript">
+  var login = io('http://localhost:1111/login');
+  var rooms_select = io('http://localhost:1111/rooms');
+  var chat = io("http://localhost:1111/chat");
+  var name = '';
+  var room = '';
+  var is_enter = false;
+  var room_enter = false;
+
+
+  // C04. server_to_clientイベント・データを受信する
+  login.on("server_to_client", function(data){login_msg(data.value)});
+  rooms_select.on("server_to_client", function(data){rooms_select_msg(data.value)});
+  rooms_select.on("server_to_client_add_room", function(data){add_room_msg(data.value)});
+  rooms_select.on("server_to_client_room_num", function(data){room_num(data.room, data.num)});
+  chat.on("server_to_client", function(data){chat_msg(data.value)});
+  chat.on("server_to_client_enter_member", function(data){enter_member(data.name)});
+  chat.on("server_to_client_room_member", function(data){room_member(data.names)});
+  chat.on("server_to_client_leave_member", function(data){leave_member(data.name)});
+
+
+  // ログイン時の処理
+  function login_msg(text) {
+    room_label();
+    $("#room")
+    if (text[0] != null) {
+      $.each(text, function(index, val) {
+        $("#room_list").append("<p id=" + val.room + " class='well'>" + val.room + " 人数：" + val.num + "人</p>");
+        $('#' + val.room).on('click', function() {
+          room = val.room;
+          enter_room("exist");
+        });
+      });
+    } else {
+      error_mess('まだ部屋がありません。');
+    }
+  }
+
+
+  // 部屋選択時の処理
+  function rooms_select_msg(text) {
+    if (text == 'true') {
+      error_mess('その部屋はすでに存在しています。');
+    } else {
+      rooms_select.emit("client_to_server_broadcast", {value : room});
+      enter_room("no_exist");
+    }
+  }
+
+
+  // 部屋作成時の処理
+  function add_room_msg(text) {
+    if ( name!='' && room == '' ) {
+      content_none("error_mess");
+      $.each(text, function(index, val) {
+        $("#room_list").append("<p id=" + val.room + " class='well'>" + val.room + " 人数：" + val.num + "人</p>");
+        $('#' + val.room).on('click', function() {
+          room = val.room;
+          enter_room("exist");
+        });
+      });
+    }
+  }
+
+
+  // 部屋の入室人数による表示変更
+  function room_num(room_name, room_num) {
+    if (room=='') {
+      content_none("error_mess");
+      if (room_num=='0') {
+        $("#" + room_name).remove();
+        if ($("#room_list").text() == '' && is_enter && !room_enter) {
+          error_mess("まだ部屋がありません。");
+        }
+      } else {
+        $("#" + room_name).text(room_name + " 人数：" + room_num + "人");
+      }
+    }
+  }
+
+
+  // チャットメッセージの表示
+  function chat_msg(text) {
+    if (room != '') {
+      $("#chat_logs").append("<p>" + text + "</p>");
+    }
+  }
+
+
+  // メンバーの名前表示
+  function room_member(names) {
+    console.log(room);
+    content_none("room_member");
+    $("#room_member").append("<li class='list-group-item'>メンバー一覧</li>");
+    $.each(names, function(index, name) {
+      $("#room_member").append("<li class='list-group-item " + name.name + "'>" + name.name + "さん</li>");
+    });
+  }
+
+
+  // 入室者の名前表示
+  function enter_member(name) {
+    console.log(room);
+    $("#room_member").append("<li class='list-group-item " + name + "'>" + name + "さん</li>");
+  }
+
+
+  // 退室者の名前を消す
+  function leave_member(name) {
+    $("." + name + ":last").remove();
+  }
+
+
+  // submit時の処理
+  $("form").submit(function(e){
+    // ログイン画面での処理
+    if(!is_enter) {
+      name = $("#login_name").val();
+      $("#login_name").val('');
+      login.emit("client_to_server_personal", {value : ''});
+    }
+    // 部屋一覧画面での処理
+    else if (!room_enter) {
+      room = $("#login_name").val();
+      $("#login_name").val('');
+      rooms_select.emit("client_to_server", {value : room});
+    }
+    // チャット画面での処理
+    else {
+      var message = "[" + name + "] : " + $("#login_name").val();
+      $("#login_name").val('');
+      chat.emit("client_to_server", {room : room, mess : message});
+    }
+    e.preventDefault();
+  });
+
+
+  // 部屋一覧画面での文字の表示設定
+  function room_label() {
+    $("#screen_name").text("部屋一覧");
+    $(".name_label").text("作成する部屋名");
+    $("button").text("送信");
+    is_enter = true; // ログインフラグON
+  }
+
+
+  // チャット画面での文字の表示設定
+  function msg_label() {
+    $(".name_label").text("メッセージ");
+    room_enter = true; // 入室フラグON
+    // 戻るボタンの作成と押下時の処理
+    $("#ret_button").append("<button type='button' class='btn btn-primary' id='return'>戻る</button>");
+    $("#return").on('click', function(){
+      room_enter = false; // 入室フラグOFF
+      content_none("chat_logs");
+      content_none("screen_name");
+      content_none("room_member");
+      content_none("ret_button");
+      chat.emit("client_to_server_return", {room : room}); // 退室処理
+      login.emit("client_to_server_personal", {value : ''}); // 部屋一覧の取得
+      room = '';
+    });
+  }
+
+
+  // 部屋に入室する際の処理
+  function enter_room(type) {
+    content_none("room_list");  // 部屋一覧を消す
+    content_none("error_mess"); // errorメッセージを消す
+    $("#screen_name").text("部屋名：" + room); // 入室した部屋名の表示
+    $("#chat_logs").append("<p>==========チャットログ==========</p>"); // チャットログ欄の作成
+    var enter_message = name + "さんが入室しました";
+    chat.emit("client_to_server_join", {name: name, room : room, code : type}); // 入室処理
+    chat.emit("client_to_server_broadcast", {room : room, mess : enter_message}); // 入室メッセージを他の人に送る
+    chat.emit("client_to_server_personal", {room : room}); // 入室メッセージを自分に送る
+    msg_label(); // ボタン等の文字の変更
+  }
+
+
+  // errorメッセージの表示
+  function error_mess(text) {
+    $("#error_mess").append("<p class='alert alert-warning' role='alert'>" + text + "</p>");
+  }
+
+
+  // 要素の削除
+  function content_none(id) {
+    $("#" + id).text('');
+  }
+
+  </script>
+</body>
+</html>
